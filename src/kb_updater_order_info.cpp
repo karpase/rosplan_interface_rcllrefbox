@@ -59,10 +59,12 @@ class ROSPlanKbUpdaterOrderInfo {
 		GET_CONFIG(privn, n, "order_delivery_period_begin_predicate", order_delivery_period_begin_predicate_);
 		GET_CONFIG(privn, n, "order_delivery_period_end_predicate", order_delivery_period_begin_predicate_);
 
+
 		GET_CONFIG(privn, n, "order_instance_type", order_instance_type_);
 		GET_CONFIG(privn, n, "order_id_argument", order_id_argument_);
 		GET_CONFIG(privn, n, "order_complexity_argument", order_complexity_argument_);
 		GET_CONFIG(privn, n, "order_color_argument", order_color_argument_);
+		GET_CONFIG(privn, n, "order_gate_argument", order_gate_argument_);
 
 		GET_CONFIG(privn, n, "rs_ring_value_blue", cfg_rs_ring_value_blue_);
 		GET_CONFIG(privn, n, "rs_ring_value_green", cfg_rs_ring_value_green_);
@@ -79,7 +81,8 @@ class ROSPlanKbUpdaterOrderInfo {
 
 
 
-		relevant_predicates_ = {order_complexity_predicate_, order_base_color_predicate_, order_ring1_color_predicate_, order_ring2_color_predicate_, order_ring3_color_predicate_, order_cap_color_predicate_, order_delivery_gate_predicate_, order_delivery_period_begin_predicate_, order_delivery_period_begin_predicate_};
+		relevant_predicates_ = {order_complexity_predicate_, order_base_color_predicate_, order_ring1_color_predicate_, order_ring2_color_predicate_, order_ring3_color_predicate_, order_cap_color_predicate_, order_delivery_gate_predicate_};
+//, order_delivery_period_begin_predicate_, order_delivery_period_begin_predicate_};
 		relevant_predicates_.sort();
 		relevant_predicates_.unique();
 		relevant_predicates_.remove_if([](const std::string &s) { return s.empty(); });
@@ -318,6 +321,10 @@ class ROSPlanKbUpdaterOrderInfo {
 		                       { {order_color_argument_, rs_cap_colors_[o.cap_color]} },
 		                       remsrv, addsrv);
 
+		check_unique_predicate(order_delivery_gate_predicate_, order_id_argument_, order_id_to_name(o.id),
+		                       { {order_gate_argument_, delivery_gate_to_name(o.delivery_gate)} },
+		                       remsrv, addsrv);
+
 		if (o.complexity > 0) {
 			check_unique_predicate(order_ring1_color_predicate_, order_id_argument_, order_id_to_name(o.id),
 		                       { {order_color_argument_, rs_ring_colors_[o.ring_colors[0]]} },
@@ -359,13 +366,19 @@ class ROSPlanKbUpdaterOrderInfo {
 	std::string
 	order_id_to_name(int order_id) 
 	{
-		return "o" + order_id;
+		return "o" + std::to_string(order_id);
 	}
 
 	std::string
 	complexity_to_name(int complexity) 
 	{
-		return "c" + complexity;
+		return "c" + std::to_string(complexity);
+	}
+
+	std::string
+	delivery_gate_to_name(int delivery_gate) 
+	{
+		return "g" + std::to_string(delivery_gate);
 	}
 
 	void
@@ -387,6 +400,7 @@ class ROSPlanKbUpdaterOrderInfo {
 		std::vector<std::string> instances = srv.response.instances;
 		std::sort(instances.begin(), instances.end());
 		for (const rcll_ros_msgs::Order &o : orders) {
+			//ROS_WARN("Got: %d = %s", o.id, order_id_to_name(o.id));
 			if (! std::binary_search(instances.begin(), instances.end(), order_id_to_name(o.id))) {
 				rosplan_knowledge_msgs::KnowledgeItem new_i;
 				new_i.knowledge_type = rosplan_knowledge_msgs::KnowledgeItem::INSTANCE;
@@ -411,7 +425,7 @@ class ROSPlanKbUpdaterOrderInfo {
 	void
 	order_info_cb(const rcll_ros_msgs::OrderInfo::ConstPtr& msg)
 	{
-		//ROS_INFO("Sending updates (conditionally)");
+		//ROS_WARN("Sending updates (conditionally)");
 		send_order_instance_updates(msg->orders);
 		for (const rcll_ros_msgs::Order &o : msg->orders) {
 			send_order_predicate_updates(o);
@@ -441,6 +455,7 @@ class ROSPlanKbUpdaterOrderInfo {
 	std::string order_id_argument_;
 	std::string order_complexity_argument_;
 	std::string order_color_argument_;
+	std::string order_gate_argument_;
 
 
 
