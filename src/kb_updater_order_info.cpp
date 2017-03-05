@@ -57,7 +57,7 @@ class ROSPlanKbUpdaterOrderInfo {
 		GET_CONFIG(privn, n, "order_cap_color_predicate", order_cap_color_predicate_);
 		GET_CONFIG(privn, n, "order_delivery_gate_predicate", order_delivery_gate_predicate_);
 		GET_CONFIG(privn, n, "order_delivery_period_begin_predicate", order_delivery_period_begin_predicate_);
-		GET_CONFIG(privn, n, "order_delivery_period_end_predicate", order_delivery_period_begin_predicate_);
+		GET_CONFIG(privn, n, "order_delivery_period_end_predicate", order_delivery_period_end_predicate_);
 
 
 		GET_CONFIG(privn, n, "order_instance_type", order_instance_type_);
@@ -85,8 +85,7 @@ class ROSPlanKbUpdaterOrderInfo {
 
 
 
-		relevant_predicates_ = {order_complexity_predicate_, order_base_color_predicate_, order_ring1_color_predicate_, order_ring2_color_predicate_, order_ring3_color_predicate_, order_cap_color_predicate_, order_delivery_gate_predicate_};
-//, order_delivery_period_begin_predicate_, order_delivery_period_begin_predicate_};
+		relevant_predicates_ = {order_complexity_predicate_, order_base_color_predicate_, order_ring1_color_predicate_, order_ring2_color_predicate_, order_ring3_color_predicate_, order_cap_color_predicate_, order_delivery_gate_predicate_, order_delivery_period_begin_predicate_, order_delivery_period_begin_predicate_};
 		relevant_predicates_.sort();
 		relevant_predicates_.unique();
 		relevant_predicates_.remove_if([](const std::string &s) { return s.empty(); });
@@ -409,6 +408,9 @@ class ROSPlanKbUpdaterOrderInfo {
 		check_unique_predicate(order_delivery_gate_predicate_, order_id_argument_, order_id_to_name(o.id),
 		                       { {order_gate_argument_, delivery_gate_to_name(o.delivery_gate)} },
 		                       remsrv, addsrv);
+
+		check_function(order_delivery_period_begin_predicate_, order_id_argument_, order_id_to_name(o.id), {}, o.delivery_period_begin, remsrv, addsrv);
+		check_function(order_delivery_period_end_predicate_, order_id_argument_, order_id_to_name(o.id), {}, o.delivery_period_end, remsrv, addsrv);
 
 		if (o.complexity > 0) {
 			check_unique_predicate(order_ring1_color_predicate_, order_id_argument_, order_id_to_name(o.id),
