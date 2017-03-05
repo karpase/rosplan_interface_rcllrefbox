@@ -303,6 +303,87 @@ class ROSPlanKbUpdaterOrderInfo {
 	}
 
 	void
+	check_function(const std::string &function_name,
+	                       const std::string &idvar_name, const std::string &idvar_value,
+	                       const std::map<std::string, std::string> &extra_args,
+	                       double function_value,
+	                       rosplan_knowledge_msgs::KnowledgeUpdateServiceArray &remsrv,
+	                       rosplan_knowledge_msgs::KnowledgeUpdateServiceArray &addsrv)
+	{
+		if (predicates_.find(function_name) != predicates_.end()) {
+			rosplan_knowledge_msgs::GetAttributeService srv;
+			srv.request.predicate_name = function_name;
+			if (! svc_current_knowledge_.isValid()) {
+				create_svc_current_knowledge();
+			}
+			if (svc_current_knowledge_.call(srv)) {
+				bool not_found_at_all = true;
+				for (const auto &a : srv.response.attributes) {
+					std::map<std::string, std::string> arguments;
+					for (const auto &kv : a.values)  arguments[kv.key] = kv.value;
+
+					if (arguments.find(idvar_name) != arguments.end() &&
+					    arguments[idvar_name] == idvar_value)
+					{
+						not_found_at_all = false;
+						if (std::any_of(extra_args.begin(), extra_args.end(),
+						                [&arguments](const auto &ev) -> bool
+						                { return (arguments.find(ev.first) != arguments.end() &&
+						                          arguments[ev.first] != ev.second); }))
+							
+						{
+							if (a.function_value != function_value) {
+								ROS_INFO("Updating '%s' for '%s'", function_name.c_str(), idvar_value.c_str());
+								rosplan_knowledge_msgs::KnowledgeItem new_a = a;
+								std::for_each(extra_args.begin(), extra_args.end(),
+									      [&new_a, &function_value](auto &ev) {
+										      for (auto &kv : new_a.values) {
+											      if (kv.key == ev.first) {
+												      kv.value = ev.second;
+												      break;
+											      }
+										      }
+										      new_a.function_value = function_value;
+									      });
+
+								remsrv.request.knowledge.push_back(a);
+								addsrv.request.knowledge.push_back(new_a);
+							} else {
+								ROS_INFO("No need to update %s", function_name.c_str());
+							}
+						}
+						// we do NOT break here, by this, we also remove any additional
+						// fact that matches the idvar and ensure data uniqueness.
+					}
+				}
+				if (not_found_at_all) {
+					// It does not exist at all, create
+					rosplan_knowledge_msgs::KnowledgeItem new_a;
+					new_a.knowledge_type = rosplan_knowledge_msgs::KnowledgeItem::FUNCTION;
+					new_a.attribute_name = function_name;
+					{ // Add ID argument
+						diagnostic_msgs::KeyValue kv;
+						kv.key = idvar_name; kv.value = idvar_value;
+						new_a.values.push_back(kv);
+					}
+					std::for_each(extra_args.begin(), extra_args.end(),
+					              [&new_a](const auto &ev) {
+						              diagnostic_msgs::KeyValue kv;
+						              kv.key = ev.first; kv.value = ev.second;
+						              new_a.values.push_back(kv);
+					              });
+					new_a.function_value = function_value;
+					addsrv.request.knowledge.push_back(new_a);
+					ROS_INFO("Adding '%s' info for %s", function_name.c_str(), idvar_value.c_str());
+				}
+			} else {
+				ROS_ERROR("Failed to call '%s' for '%s'",
+				          svc_current_knowledge_.getService().c_str(), function_name.c_str());
+			}
+		}
+	}
+
+	void
 	send_order_predicate_updates(const rcll_ros_msgs::Order &o)
 	{
 		rosplan_knowledge_msgs::KnowledgeUpdateServiceArray remsrv;
