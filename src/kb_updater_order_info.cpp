@@ -26,6 +26,7 @@
 #include <rosplan_knowledge_msgs/GetAttributeService.h>
 #include <rosplan_knowledge_msgs/GetInstanceService.h>
 #include <rosplan_knowledge_msgs/GetDomainPredicateDetailsService.h>
+#include <rosplan_knowledge_msgs/GetDomainAttributeService.h>
 #include <diagnostic_msgs/KeyValue.h>
 #include <rcll_ros_msgs/Order.h>
 #include <rcll_ros_msgs/OrderInfo.h>
@@ -85,10 +86,17 @@ class ROSPlanKbUpdaterOrderInfo {
 
 
 
-		relevant_predicates_ = {order_complexity_predicate_, order_base_color_predicate_, order_ring1_color_predicate_, order_ring2_color_predicate_, order_ring3_color_predicate_, order_cap_color_predicate_, order_delivery_gate_predicate_, order_delivery_period_begin_predicate_, order_delivery_period_begin_predicate_};
+		relevant_predicates_ = {order_complexity_predicate_, order_base_color_predicate_, order_ring1_color_predicate_, order_ring2_color_predicate_, order_ring3_color_predicate_, order_cap_color_predicate_, order_delivery_gate_predicate_};
+
 		relevant_predicates_.sort();
 		relevant_predicates_.unique();
 		relevant_predicates_.remove_if([](const std::string &s) { return s.empty(); });
+
+		relevant_functions_ = {order_delivery_period_begin_predicate_, order_delivery_period_end_predicate_};
+		relevant_functions_.sort();
+		relevant_functions_.unique();
+		relevant_functions_.remove_if([](const std::string &s) { return s.empty(); });
+
 
 		rs_ring_colors_ = { {rcll_ros_msgs::ProductColor::RING_BLUE, cfg_rs_ring_value_blue_},
 		                    {rcll_ros_msgs::ProductColor::RING_GREEN, cfg_rs_ring_value_green_},
@@ -103,6 +111,7 @@ class ROSPlanKbUpdaterOrderInfo {
 		                    {rcll_ros_msgs::ProductColor::CAP_GREY, cfg_cap_color_value_grey_} };
 
 		get_predicates();
+		get_functions();
 	}
 
 	void
@@ -163,6 +172,41 @@ class ROSPlanKbUpdaterOrderInfo {
 				ROS_ERROR("Failed to get predicate details for %s", pn.c_str());
 				return;
 			}
+		}
+	}
+
+	void
+	get_functions()
+	{
+		// fetch and store predicate details
+		ros::service::waitForService("kcl_rosplan/get_domain_functions",ros::Duration(20));
+		ros::ServiceClient func_client =
+			n.serviceClient<rosplan_knowledge_msgs::GetDomainAttributeService>
+			  ("kcl_rosplan/get_domain_functions", /* persistent */ true);
+		if (! func_client.waitForExistence(ros::Duration(20))) {
+			ROS_ERROR("No service provider for get_domain_functions");
+			return;
+		}	
+
+		rosplan_knowledge_msgs::GetDomainAttributeService func_srv;
+		
+		if (func_client.call(func_srv)) {
+			for (const auto &rf : relevant_functions_) {
+				bool found_func = false;
+				for (const auto &pn : func_srv.response.items) {			
+					if (rf == pn.name) {
+						found_func = true;
+						functions_[rf] = pn;
+						ROS_INFO("Relevant function: %s", pn.name.c_str());
+						break;
+					}
+				}
+				if (!found_func) {
+					ROS_ERROR("Failed to get function info for: %s", rf.c_str());
+				}
+			}
+		} else {
+			ROS_ERROR("Failed to get functions info");
 		}
 	}
 
@@ -309,7 +353,7 @@ class ROSPlanKbUpdaterOrderInfo {
 	                       rosplan_knowledge_msgs::KnowledgeUpdateServiceArray &remsrv,
 	                       rosplan_knowledge_msgs::KnowledgeUpdateServiceArray &addsrv)
 	{
-		if (predicates_.find(function_name) != predicates_.end()) {
+		if (functions_.find(function_name) != functions_.end()) {
 			rosplan_knowledge_msgs::GetAttributeService srv;
 			srv.request.predicate_name = function_name;
 			if (! svc_current_knowledge_.isValid()) {
@@ -567,6 +611,8 @@ class ROSPlanKbUpdaterOrderInfo {
 
 	std::map<std::string, rosplan_knowledge_msgs::DomainFormula> predicates_;
 	std::list<std::string> relevant_predicates_;
+	std::map<std::string, rosplan_knowledge_msgs::DomainFormula> functions_;
+	std::list<std::string> relevant_functions_;
 
 	std::map<int, std::string> rs_ring_colors_;
 	std::map<int, std::string> rs_base_colors_;
