@@ -31,6 +31,7 @@
 #include <rcll_ros_msgs/Order.h>
 #include <rcll_ros_msgs/OrderInfo.h>
 #include <rcll_ros_msgs/ProductColor.h>
+#include <rcll_ros_msgs/GameState.h>
 
 #define GET_CONFIG(privn, n, path, var)	  \
 	if (! privn.getParam(path, var)) {      \
@@ -44,6 +45,8 @@ class ROSPlanKbUpdaterOrderInfo {
 	{
 		sub_order_info_ = n.subscribe("rcll/order_info", 10,
 		                                &ROSPlanKbUpdaterOrderInfo::order_info_cb, this);
+                sub_game_state_ = n.subscribe("rcll/game_state", 10,
+		                                &ROSPlanKbUpdaterOrderInfo::game_state_cb, this);
 
 		create_svc_update_knowledge();
 		create_svc_current_knowledge();
@@ -59,6 +62,7 @@ class ROSPlanKbUpdaterOrderInfo {
 		GET_CONFIG(privn, n, "order_delivery_gate_predicate", order_delivery_gate_predicate_);
 		GET_CONFIG(privn, n, "order_delivery_period_begin_predicate", order_delivery_period_begin_predicate_);
 		GET_CONFIG(privn, n, "order_delivery_period_end_predicate", order_delivery_period_end_predicate_);
+		GET_CONFIG(privn, n, "game_time_predicate_", game_time_predicate_);
 
 
 		GET_CONFIG(privn, n, "order_instance_type", order_instance_type_);
@@ -92,7 +96,7 @@ class ROSPlanKbUpdaterOrderInfo {
 		relevant_predicates_.unique();
 		relevant_predicates_.remove_if([](const std::string &s) { return s.empty(); });
 
-		relevant_functions_ = {order_delivery_period_begin_predicate_, order_delivery_period_end_predicate_};
+		relevant_functions_ = {order_delivery_period_begin_predicate_, order_delivery_period_end_predicate_, game_time_predicate_};
 		relevant_functions_.sort();
 		relevant_functions_.unique();
 		relevant_functions_.remove_if([](const std::string &s) { return s.empty(); });
@@ -112,6 +116,8 @@ class ROSPlanKbUpdaterOrderInfo {
 
 		get_predicates();
 		get_functions();
+
+		current_game_time = 0;
 	}
 
 	void
@@ -365,86 +371,7 @@ class ROSPlanKbUpdaterOrderInfo {
 		}
 	}
 
-	void
-	check_function(const std::string &function_name,
-	                       const std::string &idvar_name, const std::string &idvar_value,
-	                       const std::map<std::string, std::string> &extra_args,
-	                       double function_value,
-	                       rosplan_knowledge_msgs::KnowledgeUpdateServiceArray &remsrv,
-	                       rosplan_knowledge_msgs::KnowledgeUpdateServiceArray &addsrv)
-	{
-		if (functions_.find(function_name) != functions_.end()) {
-			rosplan_knowledge_msgs::GetAttributeService srv;
-			srv.request.predicate_name = function_name;
-			if (! svc_current_knowledge_.isValid()) {
-				create_svc_current_knowledge();
-			}
-			if (svc_current_knowledge_.call(srv)) {
-				bool not_found_at_all = true;
-				for (const auto &a : srv.response.attributes) {
-					std::map<std::string, std::string> arguments;
-					for (const auto &kv : a.values)  arguments[kv.key] = kv.value;
-
-					if (arguments.find(idvar_name) != arguments.end() &&
-					    arguments[idvar_name] == idvar_value)
-					{
-						not_found_at_all = false;
-						if (std::any_of(extra_args.begin(), extra_args.end(),
-						                [&arguments](const auto &ev) -> bool
-						                { return (arguments.find(ev.first) != arguments.end() &&
-						                          arguments[ev.first] != ev.second); }))
-							
-						{
-							if (a.function_value != function_value) {
-								ROS_INFO("Updating '%s' for '%s'", function_name.c_str(), idvar_value.c_str());
-								rosplan_knowledge_msgs::KnowledgeItem new_a = a;
-								std::for_each(extra_args.begin(), extra_args.end(),
-									      [&new_a, &function_value](auto &ev) {
-										      for (auto &kv : new_a.values) {
-											      if (kv.key == ev.first) {
-												      kv.value = ev.second;
-												      break;
-											      }
-										      }
-										      new_a.function_value = function_value;
-									      });
-
-								remsrv.request.knowledge.push_back(a);
-								addsrv.request.knowledge.push_back(new_a);
-							} else {
-								ROS_INFO("No need to update %s", function_name.c_str());
-							}
-						}
-						// we do NOT break here, by this, we also remove any additional
-						// fact that matches the idvar and ensure data uniqueness.
-					}
-				}
-				if (not_found_at_all) {
-					// It does not exist at all, create
-					rosplan_knowledge_msgs::KnowledgeItem new_a;
-					new_a.knowledge_type = rosplan_knowledge_msgs::KnowledgeItem::FUNCTION;
-					new_a.attribute_name = function_name;
-					{ // Add ID argument
-						diagnostic_msgs::KeyValue kv;
-						kv.key = idvar_name; kv.value = idvar_value;
-						new_a.values.push_back(kv);
-					}
-					std::for_each(extra_args.begin(), extra_args.end(),
-					              [&new_a](const auto &ev) {
-						              diagnostic_msgs::KeyValue kv;
-						              kv.key = ev.first; kv.value = ev.second;
-						              new_a.values.push_back(kv);
-					              });
-					new_a.function_value = function_value;
-					addsrv.request.knowledge.push_back(new_a);
-					ROS_INFO("Adding '%s' info for %s", function_name.c_str(), idvar_value.c_str());
-				}
-			} else {
-				ROS_ERROR("Failed to call '%s' for '%s'",
-				          svc_current_knowledge_.getService().c_str(), function_name.c_str());
-			}
-		}
-	}
+	
 
 	void
 	send_order_predicate_updates(const rcll_ros_msgs::Order &o)
@@ -475,6 +402,9 @@ class ROSPlanKbUpdaterOrderInfo {
 
 		check_function(order_delivery_period_begin_predicate_, order_id_argument_, order_id_to_name(o.id), {}, o.delivery_period_begin, remsrv, addsrv);
 		check_function(order_delivery_period_end_predicate_, order_id_argument_, order_id_to_name(o.id), {}, o.delivery_period_end, remsrv, addsrv);
+
+		
+
 
 		if (o.complexity > 0) {
 			check_unique_predicate(order_ring1_color_predicate_, order_id_argument_, order_id_to_name(o.id),
@@ -586,10 +516,35 @@ class ROSPlanKbUpdaterOrderInfo {
 		last_order_info_ = msg;
 	}
 
+	void
+	game_state_cb(const rcll_ros_msgs::GameState::ConstPtr& msg)
+	{
+		//ROS_WARN("Sending updates (conditionally)");
+		current_game_time = msg->game_time.sec + (msg->game_time.nsec * 0.000000001);
+
+		rosplan_knowledge_msgs::KnowledgeUpdateServiceArray addsrv;
+		addsrv.request.update_type = rosplan_knowledge_msgs::KnowledgeUpdateServiceArrayRequest::ADD_KNOWLEDGE;
+
+		rosplan_knowledge_msgs::KnowledgeItem new_a;
+		new_a.knowledge_type = rosplan_knowledge_msgs::KnowledgeItem::FUNCTION;
+		new_a.attribute_name = game_time_predicate_;					
+		new_a.function_value = current_game_time;
+		addsrv.request.knowledge.push_back(new_a);
+
+		if (! svc_update_knowledge_.isValid()) {
+			create_svc_update_knowledge();
+		}
+		if( ! svc_update_knowledge_.call(addsrv)) {
+			ROS_ERROR("Failed to update game time");
+			return;
+		}
+	}
+
  private:
 	ros::NodeHandle    n;
 
 	ros::Subscriber    sub_order_info_;
+	ros::Subscriber    sub_game_state_;
 	ros::ServiceClient svc_update_knowledge_;
 	ros::ServiceClient svc_current_knowledge_;
 	ros::ServiceClient svc_current_instances_;
@@ -603,6 +558,7 @@ class ROSPlanKbUpdaterOrderInfo {
 	std::string order_delivery_gate_predicate_;
 	std::string order_delivery_period_begin_predicate_;
 	std::string order_delivery_period_end_predicate_;
+	std::string game_time_predicate_;
 
 	std::string order_instance_type_;
 	std::string order_id_argument_;
@@ -640,6 +596,7 @@ class ROSPlanKbUpdaterOrderInfo {
 	std::map<int, std::string> rs_cap_colors_;
 	
 	rcll_ros_msgs::OrderInfo::ConstPtr last_order_info_;
+	double current_game_time;
 };
 
 int
